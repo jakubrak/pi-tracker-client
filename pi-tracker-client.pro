@@ -1,7 +1,7 @@
 # This is a qmake project file, provided as an example on how to use qmake with QtGStreamer.
 
 TEMPLATE = app
-TARGET = appsink-src
+TARGET = pi-tracker-client
 
 # produce nice compilation output
 CONFIG += silent
