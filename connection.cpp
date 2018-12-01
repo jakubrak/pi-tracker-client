@@ -101,9 +101,10 @@ void Connection::parse(const QJsonObject &json) {
 
     } else if(msgid.compare(msgid, "STREAM_SETTINGS") == 0) {
         const unsigned short port = (const unsigned short)json["port"].toInt();
-        const unsigned int frameWidth = json["frameWidth"].toInt();
-        const unsigned int frameHeight = json["frameHeight"].toInt();
-        const float frameRate = (const float)json["frameRate"].toDouble();
+        auto frame = json["frame"].toObject();
+        const unsigned int frameWidth = frame["width"].toInt();
+        const unsigned int frameHeight = frame["height"].toInt();
+        const float frameRate = (const float)frame["rate"].toDouble();
         emit receivedStreamSettings(port, frameWidth, frameHeight, frameRate);
     }
 }

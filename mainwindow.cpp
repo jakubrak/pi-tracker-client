@@ -2,6 +2,8 @@
 #include "ui_mainwindow.h"
 #include "connection.h"
 
+#include <regex>
+
 #include <QGst/Parse>
 #include <QGst/Element>
 #include <QGst/Pad>
@@ -9,12 +11,14 @@
 #include <QGst/Bus>
 #include <QGlib/Connect>
 #include <QGst/ElementFactory>
+#include <QGst/GhostPad>
 
 #include <QGLWidget>
 #include <QGraphicsView>
 #include <QDebug>
 #include <QGraphicsLinearLayout>
 #include <QGraphicsProxyWidget>
+
 
 MainWindow::MainWindow(QWidget *parent) :
     QMainWindow(parent),
@@ -24,19 +28,19 @@ MainWindow::MainWindow(QWidget *parent) :
 
     pipeline.clear();
 
-    connection = new Connection();
-    thread = new QThread(this);
-    connection->moveToThread(thread);
-    connect(thread, SIGNAL(finished()), connection, SLOT(deleteLater()));
-    connect(this, SIGNAL(getDeviceList()), connection, SLOT(getDeviceList()));
-    connect(connection, SIGNAL(opened()), this, SLOT(connectionOpened()));
+//    connection = new Connection();
+//    thread = new QThread(this);
+//    connection->moveToThread(thread);
+//    connect(thread, SIGNAL(finished()), connection, SLOT(deleteLater()));
+//    connect(this, SIGNAL(getDeviceList()), connection, SLOT(getDeviceList()));
+//    connect(connection, SIGNAL(opened()), this, SLOT(connectionOpened()));
 
 
-    connect(this, SIGNAL(getStreamSettings()), connection, SLOT(getStreamSettings()));
-    connect(connection, SIGNAL(receivedStreamSettings(unsigned short,uint,uint,float)),
-            this, SLOT(receivedStreamSettings(unsigned short,uint,uint,float)));
-    connect(this, SIGNAL(startStreaming()), connection, SLOT(startStreaming()));
-    connect(connection, SIGNAL(closed()), this, SLOT(connectionClosed()));
+//    connect(this, SIGNAL(getStreamSettings()), connection, SLOT(getStreamSettings()));
+//    connect(connection, SIGNAL(receivedStreamSettings(unsigned short,uint,uint,float)),
+//            this, SLOT(receivedStreamSettings(unsigned short,uint,uint,float)));
+//    connect(this, SIGNAL(startStreaming()), connection, SLOT(startStreaming()));
+//    connect(connection, SIGNAL(closed()), this, SLOT(connectionClosed()));
 
     videoScene =  new QGraphicsScene(ui->graphicsView);
     ui->graphicsView->setScene(videoScene);
@@ -49,7 +53,7 @@ MainWindow::MainWindow(QWidget *parent) :
     QGraphicsProxyWidget *proxyOverlayWidget = videoScene->addWidget(overlayWidget);
     proxyOverlayWidget->setParentItem(videoWidget);
     proxyOverlayWidget->setZValue(1);
-    connect(overlayWidget, SIGNAL(setROI(QSize,QRect)), connection, SLOT(setROI(QSize,QRect)));
+    //connect(overlayWidget, SIGNAL(setROI(QSize,QRect)), connection, SLOT(setROI(QSize,QRect)));
 
     overlayWidget->setMinimumSize(QSize(1280, 720));
     videoWidget->setMinimumSize(QSize(1280, 720));
@@ -57,16 +61,16 @@ MainWindow::MainWindow(QWidget *parent) :
     ui->graphicsView->fitInView(videoWidget->rect(), Qt::KeepAspectRatio);
     this->showMaximized();
 
-    connectDialog = new ConnectDialog(this);
-    connect(connectDialog, SIGNAL(connectToServer(QString, short)), connection, SLOT(open(QString, short)));
-    connect(connection, SIGNAL(timeout(int,int)), connectDialog, SLOT(connectionTimeout(int, int)));
+//    connectDialog = new ConnectDialog(this);
+//    connect(connectDialog, SIGNAL(connectToServer(QString, short)), connection, SLOT(open(QString, short)));
+//    connect(connection, SIGNAL(timeout(int,int)), connectDialog, SLOT(connectionTimeout(int, int)));
 
     appSink = new AppSink(this);
     connect(appSink, SIGNAL(setRoi(QRect)), overlayWidget, SLOT(updateRoi(QRect)));
 
-    thread->start();
-    connectDialog->show();
-    //createPipeline(5001);
+//    thread->start();
+//    connectDialog->show();
+    receivedStreamSettings(0, 1280, 720, 15.0f);
 }
 
 MainWindow::~MainWindow() {
@@ -138,25 +142,117 @@ void MainWindow::onNewSample(const QGst::ElementPtr appsink) {
     qDebug() << "new data";
 }
 
-void MainWindow::onPadAdded(const QGst::PadPtr &pad) {
-    if (pad->name().startsWith(QLatin1String("video"))) {
-        qDebug() << "Pad " << pad->name() << " added";
+std::unique_ptr<Session> MainWindow::makeVideoSession() {
+    auto bin = QGst::Bin::create("video");
 
-        QGst::ElementPtr queue = pipeline->getElementByName("queue_video");
-        if (pad->link(queue->getStaticPad("sink")) != QGst::PadLinkOk) {
-            qFatal("[GSTREAMER] Failed to link %s to %s",
-                   pad->name().toStdString().c_str(),
-                   queue->getStaticPad("sink")->name().toStdString().c_str());
-        }
-    } else {
-        qDebug() << "Pad " << pad->name() << " added";
-        QGst::ElementPtr queue = pipeline->getElementByName("queue_klv");
-        if (pad->link(queue->getStaticPad("sink")) != QGst::PadLinkOk) {
-            qFatal("[GSTREAMER] Failed to link %s to %s",
-                   pad->name().toStdString().c_str(),
-                   queue->name().toStdString().c_str());
+    auto depayloader = QGst::ElementFactory::make("rtph264depay");
+    if (!depayloader) {
+        qFatal("Failed to create element. Aborting...");
+    }
+
+    auto decoder = QGst::ElementFactory::make("avdec_h264");
+    if (!decoder) {
+        qFatal("Failed to create element. Aborting...");
+    }
+
+    auto converter = QGst::ElementFactory::make("videoconvert");
+    if (!converter) {
+        qFatal("Failed to create element. Aborting...");
+    }
+
+    auto videoSink = videoSurface->videoSink();
+    videoSink->setProperty("sync", true);
+    videoSink->setProperty("async", true);
+
+    bin->add(depayloader, decoder, converter, videoSink);
+    bin->linkMany(depayloader, decoder, converter, videoSink);
+
+    auto caps = QGst::Caps::fromString("application/x-rtp,"
+                                       "media=video,"
+                                       "encoding-name=H264,"
+                                       "payload=96,"
+                                       "clock-rate=90000");
+
+    bin->addPad(QGst::GhostPad::create(depayloader->getStaticPad("sink"), "sink"));
+
+    return std::make_unique<Session>(1, caps, bin);
+}
+
+std::unique_ptr<Session> MainWindow::makeMetadataSession()
+{
+    auto bin = QGst::Bin::create("klv");
+
+    auto depayloader = QGst::ElementFactory::make("rtpklvdepay");
+    if (!depayloader) {
+        qFatal("Failed to create element. Aborting...");
+    }
+
+    auto capsFilter = QGst::ElementFactory::make("capsfilter");
+    if (!capsFilter) {
+        qFatal("Failed to create element. Aborting...");
+    }
+    capsFilter->setProperty("caps", QGst::Caps::fromString("meta/x-klv"));
+
+    appSink->setCaps(QGst::Caps::fromString("meta/x-klv"));
+    appSink->element()->setProperty("sync", true);
+    appSink->element()->setProperty("async", true);
+
+    bin->add(depayloader, capsFilter, appSink->element());
+    bin->linkMany(depayloader, capsFilter, appSink->element());
+
+    auto caps = QGst::Caps::fromString("application/x-rtp,"
+                                       "media=application,"
+                                       "encoding-name=SMPTE336M,"
+                                       "payload=96,"
+                                       "clock-rate=90000");
+
+    bin->addPad(QGst::GhostPad::create(depayloader->getStaticPad("sink"), "sink"));
+
+    return std::make_unique<Session>(2, caps, bin);
+}
+
+void MainWindow::onPadAdded(const QGst::PadPtr &pad) {;
+    qDebug() << "Pad added";
+    std::regex re("recv_rtp_src_([0-9]+)");
+    std::cmatch m;
+    pad->name().sprintf("recv_rtp_src_");
+    if (std::regex_search(pad->name().toStdString().c_str(), m, re)) {
+        auto sessionId = std::stoi(m[1]);
+        if (sessionId == videoSession->getId()) {
+            qDebug() << "Video session";
+            pipeline->add(videoSession->getBin());
+            videoSession->getBin()->syncStateWithParent();
+            auto videoPad =  videoSession->getBin()->getStaticPad("sink");
+            if (!videoPad) {
+                qDebug() << "Something is wrong with static pad";
+            }
+            pad->link(videoPad);
+        } else if (sessionId == metadataSession->getId()) {
+            qDebug() << "Metadata session";
+            pipeline->add(metadataSession->getBin());
+            metadataSession->getBin()->syncStateWithParent();
+            pad->link(metadataSession->getBin()->getStaticPad("sink"));
         }
     }
+}
+
+void MainWindow::joinSession(QGst::ElementPtr rtpBin, int rtpPort, int rtcpPort, const Session& session) {
+    auto rtpSrc = QGst::ElementFactory::make("udpsrc");
+    if (!rtpSrc) {
+        qFatal("Failed to create udpsrc. Aborting...");
+    }
+    rtpSrc->setProperty("port", rtpPort);
+    rtpSrc->setProperty("caps", session.getCaps());
+    pipeline->add(rtpSrc);
+    rtpSrc->link(rtpBin, std::string("recv_rtp_sink_" + std::to_string(session.getId())).c_str());
+
+    // recv sink will be added when the pad becomes available
+
+    // video rtcp connection
+    auto rtcpSrc = QGst::ElementFactory::make("udpsrc");
+    rtcpSrc->setProperty("port", rtcpPort);
+    pipeline->add(rtcpSrc);
+    rtcpSrc->link(rtpBin, std::string("recv_rtcp_sink_" + std::to_string(session.getId())).c_str());
 }
 
 void MainWindow::createPipeline(const unsigned short port)
@@ -164,150 +260,31 @@ void MainWindow::createPipeline(const unsigned short port)
     destroyPipeline();
 
     pipeline = QGst::Pipeline::create();
+
+    auto rtpBin = QGst::ElementFactory::make("rtpbin");
+    if (!rtpBin) {
+        qFatal("Failed to create rtpbin. Aborting...");
+    }
+
+    // watch the bus
     if (QGlib::connect(pipeline->bus(), "message", this, &MainWindow::onBusMessage, QGlib::PassSender) == false) {
          qDebug() << "Failed to connect message::error signal from " << pipeline->name();
     }
     pipeline->bus()->addSignalWatch();
 
-    QGst::ElementPtr udpsrc = QGst::ElementFactory::make("udpsrc", "source");
-    if (!udpsrc) {
-        qFatal("Failed to create udpsrc. Aborting...");
-    }
-    udpsrc->setProperty("port", (int)port);
-    udpsrc->setProperty("caps", QGst::Caps::fromString("application/x-rtp,"
-                                                          "media=(string)video,"
-                                                          "encoding-name=(string)MP2T"));
+    pipeline->add(rtpBin);
+    rtpBin->setProperty("latency", 50);
+    rtpBin->setProperty("do-retransmission", true);
 
-    QGst::ElementPtr queue_udp = QGst::ElementFactory::make("queue", "queue_udp");
-    if (!queue_udp) {
-        qFatal("Failed to create queue. Aborting...");
-    }
+    QGlib::connect(rtpBin, "pad-added", this, &MainWindow::onPadAdded);
 
-    QGst::ElementPtr rtpmp2tdepay = QGst::ElementFactory::make("rtpmp2tdepay", "rtpdepay");
-    if (!rtpmp2tdepay) {
-        qFatal("Failed to create rtph264depay. Aborting...");
-    }
+    videoSession = makeVideoSession();
+    metadataSession = makeMetadataSession();
 
-    QGst::ElementPtr tsdemux = QGst::ElementFactory::make("tsdemux", "demuxer");
-    if (!tsdemux) {
-        qFatal("Failed to create tsdemux. Aborting...");
-    }
+    joinSession(rtpBin, 5000, 5001, *videoSession);
+    joinSession(rtpBin, 5006, 5007, *metadataSession);
 
-    QGst::ElementPtr queue_video = QGst::ElementFactory::make("queue", "queue_video");
-    if (!queue_video) {
-        qFatal("Failed to create queue. Aborting...");
-    }
-
-    QGst::ElementPtr h264parse = QGst::ElementFactory::make("h264parse", "parser");
-    if (!h264parse) {
-        qFatal("Failed to create h264parse. Aborting...");
-    }
-
-    QGst::ElementPtr avdec_h264 = QGst::ElementFactory::make("avdec_h264", "decoder");
-    if (!avdec_h264) {
-        qFatal("Failed to create avdec_h264. Aborting...");
-    }
-
-    QGst::ElementPtr videoconvert = QGst::ElementFactory::make("videoconvert", "converter");
-    if (!videoconvert) {
-        qFatal("Failed to create videoconvert. Aborting...");
-    }
-
-    QGst::ElementPtr appsink_video = videoSurface->videoSink();
-    appsink_video->setProperty("sync", false);
-    appsink_video->setProperty("async", false);
-    appsink_video->setProperty("drop", true);
-
-    QGst::ElementPtr queue_klv = QGst::ElementFactory::make("queue", "queue_klv");
-    if (!queue_klv) {
-        qFatal("Failed to create queue. Aborting...");
-    }
-
-    QGst::ElementPtr capsfilter_klv = QGst::ElementFactory::make("capsfilter", "capsfilter_klv");
-    if (!capsfilter_klv) {
-        qFatal("Failed to create capsfilter_klv. Aborting...");
-    }
-
-    capsfilter_klv->setProperty("caps", QGst::Caps::fromString("meta/x-klv"));
-
-    appSink->setCaps(QGst::Caps::fromString("meta/x-klv"));
-    QGst::ElementPtr appsink_klv = appSink->element();
-    appsink_klv->setProperty("sync", false);
-    appsink_klv->setProperty("async", false);
-
-    pipeline->add(udpsrc);
-    pipeline->add(queue_udp);
-    pipeline->add(rtpmp2tdepay);
-    pipeline->add(tsdemux);
-    pipeline->add(queue_video);
-    pipeline->add(h264parse);
-    pipeline->add(avdec_h264);
-    pipeline->add(videoconvert);
-    pipeline->add(appsink_video);
-    pipeline->add(queue_klv);
-    pipeline->add(capsfilter_klv);
-    pipeline->add(appsink_klv);
-
-    if (udpsrc->link(queue_udp) == false) {
-        qFatal("[GSTREAMER] Failed to link %s to %s",
-               udpsrc->name().toStdString().c_str(),
-               queue_udp->name().toStdString().c_str());
-    }
-
-    if (queue_udp->link(rtpmp2tdepay) == false) {
-        qFatal("[GSTREAMER] Failed to link %s to %s",
-               queue_udp->name().toStdString().c_str(),
-               rtpmp2tdepay->name().toStdString().c_str());
-    }
-
-    if (rtpmp2tdepay->link(tsdemux) == false) {
-        qFatal("[GSTREAMER] Failed to link %s to %s",
-               rtpmp2tdepay->name().toStdString().c_str(),
-               tsdemux->name().toStdString().c_str());
-    }
-
-    if (queue_video->link(h264parse) == false) {
-        qFatal("[GSTREAMER] Failed to link %s to %s",
-               queue_video->name().toStdString().c_str(),
-               h264parse->name().toStdString().c_str());
-    }
-
-    if (h264parse->link(avdec_h264) == false) {
-        qFatal("[GSTREAMER] Failed to link %s to %s",
-               h264parse->name().toStdString().c_str(),
-               avdec_h264->name().toStdString().c_str());
-    }
-
-    if (avdec_h264->link(videoconvert) == false) {
-        qFatal("[GSTREAMER] Failed to link %s to %s",
-               avdec_h264->name().toStdString().c_str(),
-               videoconvert->name().toStdString().c_str());
-    }
-
-    if (videoconvert->link(appsink_video) == false) {
-        qFatal("[GSTREAMER] Failed to link %s to %s",
-               videoconvert->name().toStdString().c_str(),
-               appsink_video->name().toStdString().c_str());
-    }
-
-    if (QGlib::connect(tsdemux, "pad-added", this, &MainWindow::onPadAdded) == false) {
-        qDebug() << "Failed to connect pad-added signal from " << tsdemux->name();
-    }
-
-    if (queue_klv->link(capsfilter_klv) == false) {
-        qFatal("[GSTREAMER] Failed to link %s to %s",
-               queue_klv->name().toStdString().c_str(),
-               capsfilter_klv->name().toStdString().c_str());
-    }
-
-    if (capsfilter_klv->link(appsink_klv) == false) {
-        qFatal("[GSTREAMER] Failed to link %s to %s",
-               capsfilter_klv->name().toStdString().c_str(),
-               appsink_klv->name().toStdString().c_str());
-    }
-
-    pipeline->setProperty("latency", 500000000);
-
+    // play
     pipeline->setState(QGst::StatePlaying);
 }
 

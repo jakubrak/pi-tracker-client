@@ -1,6 +1,8 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
+#include <memory>
+
 #include <QMainWindow>
 #include <QGraphicsScene>
 #include <QGst/Ui/GraphicsVideoSurface>
@@ -12,6 +14,7 @@
 #include "connection.h"
 #include "appsink.h"
 #include "overlaywidget.h"
+#include "session.h"
 
 namespace Ui {
 class MainWindow;
@@ -26,6 +29,12 @@ public:
     ~MainWindow();
 
     void resizeEvent(QResizeEvent *event);
+
+    std::unique_ptr<Session> makeVideoSession();
+
+    std::unique_ptr<Session> makeMetadataSession();
+
+    void joinSession(QGst::ElementPtr rtpBin, int rtpPort, int rtcpPort, const Session& session);
 
 signals:
     void openConnection(QString address, short port);
@@ -49,6 +58,8 @@ private:
     ConnectDialog *connectDialog;
     Connection *connection;
     QGst::PipelinePtr pipeline;
+    std::unique_ptr<Session> videoSession;
+    std::unique_ptr<Session> metadataSession;
 
     Ui::MainWindow *ui;
 
