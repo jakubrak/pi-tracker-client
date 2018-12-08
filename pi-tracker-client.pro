@@ -30,11 +30,11 @@ QT += core gui network widgets opengl
 # Input
 SOURCES += main.cpp \
     mainwindow.cpp \
-    connection.cpp \
     connectdialog.cpp \
     overlaywidget.cpp \
     appsink.cpp \
-    session.cpp
+    session.cpp \
+    pipeline.cpp
 
 FORMS += \
     mainwindow.ui \
@@ -42,9 +42,9 @@ FORMS += \
 
 HEADERS += \
     mainwindow.h \
-    connection.h \
     common.h \
     connectdialog.h \
     overlaywidget.h \
     appsink.h \
-    session.h
+    session.h \
+    pipeline.h
