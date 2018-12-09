@@ -12,7 +12,7 @@
 #include "appsink.h"
 #include "session.h"
 
-Pipeline::Pipeline(QGst::ElementPtr videoSink) : videoSink{videoSink} {
+Pipeline::Pipeline(QObject *parent) : QObject{parent} {
     pipeline = QGst::Pipeline::create();
 
     auto rtpBin = QGst::ElementFactory::make("rtpbin");
@@ -24,6 +24,7 @@ Pipeline::Pipeline(QGst::ElementPtr videoSink) : videoSink{videoSink} {
     if (QGlib::connect(pipeline->bus(), "message", this, &Pipeline::onBusMessage, QGlib::PassSender) == false) {
          qDebug() << "Failed to connect message::error signal from " << pipeline->name();
     }
+
     pipeline->bus()->addSignalWatch();
 
     pipeline->add(rtpBin);
@@ -35,6 +36,8 @@ Pipeline::Pipeline(QGst::ElementPtr videoSink) : videoSink{videoSink} {
     appSink = std::make_unique<AppSink>();
     videoSession = makeVideoSession();
     metadataSession = makeMetadataSession();
+
+    qDebug() << "Join sessions";
 
     joinSession(rtpBin, 5000, *videoSession);
     joinSession(rtpBin, 5006, *metadataSession);
@@ -101,19 +104,20 @@ void Pipeline::onBusMessage(const QGst::ObjectPtr object, const QGst::MessagePtr
     default:
         break;
     }
-}
 
-void Pipeline::onNewSample(const QGst::ElementPtr appsink) {
-    qDebug() << "new data";
+    // workaround to get frame size from pipeline
+    checkCaps();
 }
 
 std::unique_ptr<Session> Pipeline::makeVideoSession() {
     auto bin = QGst::Bin::create("video");
 
+
     auto depayloader = QGst::ElementFactory::make("rtph264depay");
     if (!depayloader) {
         qFatal("Failed to create element. Aborting...");
     }
+
 
     auto decoder = QGst::ElementFactory::make("avdec_h264");
     if (!decoder) {
@@ -125,8 +129,15 @@ std::unique_ptr<Session> Pipeline::makeVideoSession() {
         qFatal("Failed to create element. Aborting...");
     }
 
+    videoSink = QGst::ElementFactory::make("qt5videosink");
+    if (!videoSink) {
+        qFatal("Failed to create element. Aborting...");
+    }
+
     videoSink->setProperty("sync", true);
     videoSink->setProperty("async", true);
+    videoSink->setProperty("force-aspect-ratio", true);
+    QGlib::connect(videoSink, "update", this, &Pipeline::onUpdate, QGlib::PassSender);
 
     bin->add(depayloader, decoder, converter, videoSink);
     bin->linkMany(depayloader, decoder, converter, videoSink);
@@ -180,6 +191,7 @@ void Pipeline::onPadAdded(const QGst::PadPtr &pad) {
     std::regex re("recv_rtp_src_([0-9]+)");
     std::cmatch m;
     pad->name().sprintf("recv_rtp_src_");
+
     if (std::regex_search(pad->name().toStdString().c_str(), m, re)) {
         auto sessionId = std::stoi(m[1]);
         if (sessionId == videoSession->getId()) {
@@ -191,6 +203,7 @@ void Pipeline::onPadAdded(const QGst::PadPtr &pad) {
                 qDebug() << "Something is wrong with static pad";
             }
             pad->link(videoPad);
+
         } else if (sessionId == metadataSession->getId()) {
             qDebug() << "Metadata session";
             pipeline->add(metadataSession->getBin());
@@ -225,4 +238,22 @@ void Pipeline::joinSession(QGst::ElementPtr rtpBin, int rtpPort, const Session& 
     rtcpSink->setProperty("async", false);
     pipeline->add(rtcpSrc);
     rtcpSrc->link(rtpBin, std::string("recv_rtcp_src_" + std::to_string(session.getId())).c_str());
+}
+
+void Pipeline::onUpdate(const QGst::ElementPtr &element) {
+    //qDebug() << "UPDATE";
+}
+
+void Pipeline::checkCaps() {
+    auto pad = videoSink->getStaticPad("sink");
+    if (pad) {
+        auto caps = pad->currentCaps();
+        if (caps) {
+            if (!videoCaps || !videoCaps->equals(caps)) {
+                videoCaps = caps;
+                emit frameSizeChanged(QSize(caps->internalStructure(0)->value("width").toInt(),
+                                            caps->internalStructure(0)->value("height").toInt()));
+            }
+        }
+    }
 }

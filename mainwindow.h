@@ -6,7 +6,7 @@
 #include <QMainWindow>
 #include <QGraphicsScene>
 #include <QGst/Ui/GraphicsVideoSurface>
-#include <QGst/Ui/GraphicsVideoWidget>
+#include <QGst/Ui/VideoWidget>
 #include <QThread>
 
 #include "connectdialog.h"
@@ -37,16 +37,12 @@ signals:
 private slots:
     void connectionOpened();
     void connectionClosed();
-    void receivedStreamSettings(unsigned short port,
-        unsigned int frameWidth,
-        unsigned int frameHeight,
-        float frameRate);
+    void frameSizeChanged(QSize frameSize);
 
 private:
     QGraphicsScene *videoScene;
     QGst::Ui::GraphicsVideoSurface *videoSurface;
-    QGst::Ui::GraphicsVideoWidget *videoWidget;
-
+    QGst::Ui::VideoWidget *videoWidget;
     ConnectDialog *connectDialog;
 
     Ui::MainWindow *ui;
@@ -54,7 +50,7 @@ private:
     QThread *thread;
     OverlayWidget *overlayWidget;
 
-    std::unique_ptr<Pipeline> pipeline;
+    Pipeline *pipeline;
 };
 
 #endif // MAINWINDOW_H

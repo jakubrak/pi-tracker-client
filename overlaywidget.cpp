@@ -4,8 +4,7 @@
 
 
 OverlayWidget::OverlayWidget(QWidget *parent) : QWidget(parent) {
-    //this->setWindowOpacity(0);
-    setWindowFlags(Qt::FramelessWindowHint);
+    setWindowFlags(Qt::Widget | Qt::FramelessWindowHint | Qt::ToolTip | Qt::WindowStaysOnTopHint);
     setAttribute(Qt::WA_NoSystemBackground);
     setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_PaintOnScreen);

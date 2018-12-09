@@ -34,23 +34,22 @@ MainWindow::MainWindow(QWidget *parent) :
 //    connect(this, SIGNAL(startStreaming()), connection, SLOT(startStreaming()));
 //    connect(connection, SIGNAL(closed()), this, SLOT(connectionClosed()));
 
-    videoScene =  new QGraphicsScene(ui->graphicsView);
-    ui->graphicsView->setScene(videoScene);
-    videoSurface = new QGst::Ui::GraphicsVideoSurface(ui->graphicsView);
-    videoWidget = new QGst::Ui::GraphicsVideoWidget();
-    videoWidget->setSurface(videoSurface);
-    videoScene->addItem(videoWidget);
 
+    videoWidget = new QGst::Ui::VideoWidget();
     overlayWidget = new OverlayWidget();
-    QGraphicsProxyWidget *proxyOverlayWidget = videoScene->addWidget(overlayWidget);
-    proxyOverlayWidget->setParentItem(videoWidget);
-    proxyOverlayWidget->setZValue(1);
+    videoScene =  new QGraphicsScene(ui->graphicsView);
+    videoScene->addWidget(videoWidget);
+    videoScene->addWidget(overlayWidget);
+    videoScene->setBackgroundBrush(QBrush(Qt::black, Qt::SolidPattern));
+    ui->graphicsView->setScene(videoScene);
+
+    //proxyOverlayWidget->setParentItem(videoWidget->graphicsProxyWidget());
+    //proxyOverlayWidget->setZValue(1);
     //connect(overlayWidget, SIGNAL(setROI(QSize,QRect)), connection, SLOT(setROI(QSize,QRect)));
 
-    overlayWidget->setMinimumSize(QSize(1280, 720));
-    videoWidget->setMinimumSize(QSize(1280, 720));
-    videoScene->setSceneRect(videoWidget->rect());
-    ui->graphicsView->fitInView(videoWidget->rect(), Qt::KeepAspectRatio);
+    //overlayWidget->setMinimumSize(QSize(1280, 720));
+    //videoWidget->setMinimumSize(QSize(1280, 720));
+    //videoScene->setSceneRect(videoWidget->rect());
     this->showMaximized();
 
 //    connectDialog = new ConnectDialog(this);
@@ -61,7 +60,14 @@ MainWindow::MainWindow(QWidget *parent) :
 
 //    thread->start();
 //    connectDialog->show();
-    receivedStreamSettings(0, 1280, 720, 15.0f);
+    pipeline = new Pipeline(this);
+    connect(pipeline, SIGNAL(frameSizeChanged(QSize)), this, SLOT(frameSizeChanged(QSize)));
+
+    videoWidget->setVideoSink(pipeline->getVideoSink());
+
+    pipeline->play();
+
+    emit startStreaming();
 }
 
 MainWindow::~MainWindow() {
@@ -72,7 +78,7 @@ MainWindow::~MainWindow() {
 
 void MainWindow::resizeEvent(QResizeEvent *event) {
     QMainWindow::resizeEvent(event);
-    videoScene->setSceneRect(videoScene->sceneRect());
+    qDebug() << videoScene->sceneRect();
     ui->graphicsView->fitInView(videoScene->sceneRect(), Qt::KeepAspectRatio);
 }
 
@@ -88,27 +94,11 @@ void MainWindow::connectionClosed() {
     connectDialog->show();
 }
 
-void MainWindow::receivedStreamSettings(unsigned short port,
-    unsigned int frameWidth,
-    unsigned int frameHeight,
-    float frameRate) {
+void MainWindow::frameSizeChanged(QSize frameSize) {
+    qDebug() << "New frame size: " << frameSize;
+    overlayWidget->setMinimumSize(frameSize);
+    videoWidget->setMinimumSize(frameSize);
+    videoScene->setSceneRect(0, 0, frameSize.width(), frameSize.height());
+    ui->graphicsView->fitInView(videoScene->sceneRect(), Qt::KeepAspectRatio);
 
-    /*videoScene =  new QGraphicsScene(ui->graphicsView);
-    ui->graphicsView->setScene(videoScene);
-    videoSurface = new QGst::Ui::GraphicsVideoSurface(ui->graphicsView);
-    videoWidget = new QGst::Ui::GraphicsVideoWidget();
-    videoWidget->setSurface(videoSurface);
-    videoWidget->setPreferredSize(frameWidth, frameHeight);
-    videoScene->addItem(videoWidget);*/
-    //videoScene->addWidget(new OverlayWidget(ui->graphicsView));
-
-    overlayWidget->setMinimumSize(QSize(frameWidth, frameHeight));
-    videoWidget->setMinimumSize(QSize(frameWidth, frameHeight));
-    videoScene->setSceneRect(videoWidget->rect());
-    ui->graphicsView->fitInView(videoWidget->rect(), Qt::KeepAspectRatio);
-
-    pipeline = std::make_unique<Pipeline>(videoSurface->videoSink());
-    pipeline->play();
-
-    emit startStreaming();
 }

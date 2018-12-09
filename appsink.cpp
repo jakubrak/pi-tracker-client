@@ -22,7 +22,7 @@ QGst::FlowReturn AppSink::newSample() {
             .arg(timestamp.minute(), 2)
             .arg(timestamp.second(), 2)
             .arg(timestamp.msec(), 3);
-    qDebug() << "[GSTREAMER] " << timeString << "new KLV data:" << hexString;
+    //qDebug() << "[GSTREAMER] " << timeString << "new KLV data:" << hexString;
     quint32 roiX = 0;
     quint32 roiY = 0;
     quint32 roiW = 0;
