@@ -44,6 +44,7 @@ MainWindow::MainWindow(QWidget *parent) :
     connect(this, SIGNAL(getStreamSettings()), connection, SLOT(getStreamSettings()));
     connect(connection, SIGNAL(receivedStreamSettings(int, int, int, int, double)),
             this, SLOT(receivedStreamSettings(int, int, int, int, double)));
+    connect(this, SIGNAL(startStreaming()), connection, SLOT(startStreaming()));
 
     // ROI
     connect(overlayWidget, SIGNAL(setRoi(QRect)), connection, SLOT(setRoi(QRect)));
@@ -69,9 +70,6 @@ void MainWindow::connectionOpened() {
 }
 
 void MainWindow::connectionClosed() {
-    //connectDialog = new ConnectDialog(this);
-    //connect(connectDialog, SIGNAL(connectToServer(QString, short)), connection, SLOT(open(QString, short)));
-    //connect(connection, SIGNAL(timeout(int,int)), connectDialog, SLOT(connectionTimeout(int, int)));
     connectDialog->show();
 }
 
@@ -100,4 +98,5 @@ void MainWindow::receivedStreamSettings(int videoPort,
     connect(pipeline, SIGNAL(frameSizeChanged(QSize)), this, SLOT(frameSizeChanged(QSize)));
     connect(pipeline, SIGNAL(updateRoi(QRect)), overlayWidget, SLOT(updateRoi(QRect)));
     pipeline->play();
+    emit startStreaming();
 }
