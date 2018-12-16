@@ -11,6 +11,7 @@
 
 #include "connectdialog.h"
 #include "overlaywidget.h"
+#include "connection.h"
 
 class Pipeline;
 
@@ -38,11 +39,18 @@ private slots:
     void connectionOpened();
     void connectionClosed();
     void frameSizeChanged(QSize frameSize);
+    void receivedStreamSettings(int videoPort,
+        int metadataPort,
+        int frameWidth,
+        int frameHeight,
+        double frameRate);
 
 private:
     QGraphicsScene *videoScene;
     QGst::Ui::GraphicsVideoSurface *videoSurface;
     QGst::Ui::VideoWidget *videoWidget;
+
+    Connection *connection;
     ConnectDialog *connectDialog;
 
     Ui::MainWindow *ui;

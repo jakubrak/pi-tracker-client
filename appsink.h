@@ -15,7 +15,7 @@ public:
     AppSink(QObject *parent = 0) : QObject(parent) { }
 
 signals:
-    void setRoi(QRect roi);
+    void updateRoi(QRect roi);
 
 protected:
     virtual void eos();

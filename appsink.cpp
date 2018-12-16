@@ -37,7 +37,7 @@ QGst::FlowReturn AppSink::newSample() {
     roiH = qFromLittleEndian(roiH);
     QRect roi(roiX, roiY, roiW, roiH);
     //qDebug() << "new ROI: " <<  roiX << ", " << roiY << ", " << roiW << "x" << roiH;
-    emit setRoi(roi);
+    emit updateRoi(roi);
 
     return QGst::FlowOk;
 }

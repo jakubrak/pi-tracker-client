@@ -2,22 +2,26 @@
 
 #include <regex>
 
+#include <QString>
+
 #include <QGlib/Connect>
 #include <QGst/Bus>
 #include <QGst/ElementFactory>
 #include <QGst/GhostPad>
 #include <QGst/Message>
 #include <QGst/Pad>
+#include <QGst/Buffer>
 
 #include "appsink.h"
-#include "session.h"
 
-Pipeline::Pipeline(QObject *parent) : QObject{parent} {
+Pipeline::Pipeline(const QString &host, int videoPort, int metadataPort, QObject *parent) :
+    QObject{parent},
+    host{host} {
     pipeline = QGst::Pipeline::create();
 
     auto rtpBin = QGst::ElementFactory::make("rtpbin");
     if (!rtpBin) {
-        qFatal("Failed to create rtpbin. Aborting...");
+        qFatal("Failed to create element. Aborting...");
     }
 
     // watch the bus
@@ -33,14 +37,16 @@ Pipeline::Pipeline(QObject *parent) : QObject{parent} {
 
     QGlib::connect(rtpBin, "pad-added", this, &Pipeline::onPadAdded);
 
-    appSink = std::make_unique<AppSink>();
-    videoSession = makeVideoSession();
-    metadataSession = makeMetadataSession();
+    appSink = new AppSink(this);
+    videoSession = makeVideoSession(videoPort);
+    metadataSession = makeMetadataSession(metadataPort);
 
     qDebug() << "Join sessions";
 
-    joinSession(rtpBin, 5000, *videoSession);
-    joinSession(rtpBin, 5006, *metadataSession);
+    joinSession(rtpBin, *videoSession);
+    joinSession(rtpBin, *metadataSession);
+
+    connect(appSink, SIGNAL(updateRoi(QRect)), this, SIGNAL(updateRoi(QRect)));
 }
 
 Pipeline::~Pipeline() {
@@ -58,19 +64,14 @@ QString Pipeline::toString(QGst::State state) {
     switch(state) {
     case QGst::StateNull:
         return "Null";
-        break;
     case QGst::StatePaused:
         return "Paused";
-        break;
     case QGst::StatePlaying:
         return "Playing";
-        break;
     case QGst::StateReady:
         return "Ready";
-        break;
     case QGst::StateVoidPending:
         return "VoidPending";
-        break;
     }
 }
 
@@ -79,7 +80,6 @@ void Pipeline::onBusMessage(const QGst::ObjectPtr object, const QGst::MessagePtr
     switch (message->type()) {
     case QGst::MessageEos:
         exit(0);
-        break;
     case QGst::MessageError:
         qCritical() << message.staticCast<QGst::ErrorMessage>()->error();
         break;
@@ -109,7 +109,7 @@ void Pipeline::onBusMessage(const QGst::ObjectPtr object, const QGst::MessagePtr
     checkCaps();
 }
 
-std::unique_ptr<Session> Pipeline::makeVideoSession() {
+std::unique_ptr<Pipeline::Session> Pipeline::makeVideoSession(const int port) {
     auto bin = QGst::Bin::create("video");
 
 
@@ -150,10 +150,10 @@ std::unique_ptr<Session> Pipeline::makeVideoSession() {
 
     bin->addPad(QGst::GhostPad::create(depayloader->getStaticPad("sink"), "sink"));
 
-    return std::make_unique<Session>(1, caps, bin);
+    return std::make_unique<Session>(1, caps, bin, port);
 }
 
-std::unique_ptr<Session> Pipeline::makeMetadataSession()
+std::unique_ptr<Pipeline::Session> Pipeline::makeMetadataSession(const int port)
 {
     auto bin = QGst::Bin::create("klv");
 
@@ -183,7 +183,7 @@ std::unique_ptr<Session> Pipeline::makeMetadataSession()
 
     bin->addPad(QGst::GhostPad::create(depayloader->getStaticPad("sink"), "sink"));
 
-    return std::make_unique<Session>(2, caps, bin);
+    return std::make_unique<Session>(2, caps, bin, port);
 }
 
 void Pipeline::onPadAdded(const QGst::PadPtr &pad) {
@@ -213,12 +213,12 @@ void Pipeline::onPadAdded(const QGst::PadPtr &pad) {
     }
 }
 
-void Pipeline::joinSession(QGst::ElementPtr rtpBin, int rtpPort, const Session& session) {
+void Pipeline::joinSession(QGst::ElementPtr rtpBin, const Session& session) {
     auto rtpSrc = QGst::ElementFactory::make("udpsrc");
     if (!rtpSrc) {
         qFatal("Failed to create udpsrc. Aborting...");
     }
-    rtpSrc->setProperty("port", rtpPort);
+    rtpSrc->setProperty("port", session.getPort());
     rtpSrc->setProperty("caps", session.getCaps());
     pipeline->add(rtpSrc);
     rtpSrc->link(rtpBin, std::string("recv_rtp_sink_" + std::to_string(session.getId())).c_str());
@@ -227,13 +227,13 @@ void Pipeline::joinSession(QGst::ElementPtr rtpBin, int rtpPort, const Session& 
 
     // video rtcp connection
     auto rtcpSrc = QGst::ElementFactory::make("udpsrc");
-    rtcpSrc->setProperty("port", rtpPort + 1);
+    rtcpSrc->setProperty("port", session.getPort() + 1);
     pipeline->add(rtcpSrc);
     rtcpSrc->link(rtpBin, std::string("recv_rtcp_sink_" + std::to_string(session.getId())).c_str());
 
     auto rtcpSink = QGst::ElementFactory::make("udpsink");
-    rtcpSink->setProperty("port", rtpPort + 2);
-    rtcpSink->setProperty("host", "192.168.0.108");
+    rtcpSink->setProperty("port", session.getPort() + 2);
+    rtcpSink->setProperty("host", host);
     rtcpSink->setProperty("sync", false);
     rtcpSink->setProperty("async", false);
     pipeline->add(rtcpSrc);
@@ -256,4 +256,25 @@ void Pipeline::checkCaps() {
             }
         }
     }
+}
+
+Pipeline::Session::Session(int id, QGst::CapsPtr caps, QGst::BinPtr bin, int port)
+    : id{id}, caps{caps}, bin{bin}, port{port} {
+
+}
+
+int Pipeline::Session::getId() const {
+    return id;
+}
+
+QGst::CapsPtr Pipeline::Session::getCaps() const {
+    return caps;
+}
+
+QGst::BinPtr Pipeline::Session::getBin() const {
+    return bin;
+}
+
+int Pipeline::Session::getPort() const {
+    return port;
 }

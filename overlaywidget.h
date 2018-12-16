@@ -21,7 +21,7 @@ public slots:
     void updateRoi(QRect roi);
 
 signals:
-    void setROI(QSize windowSize, QRect roi);
+    void setRoi(QRect roi);
 
 private:
     QPainter *painter;

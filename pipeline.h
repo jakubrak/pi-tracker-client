@@ -4,18 +4,17 @@
 #include <memory>
 
 #include <QSize>
+#include <QRect>
 
 #include <QGst/Pipeline>
 
 class AppSink;
-class Session;
 
-class Pipeline : public QObject
-{
+class Pipeline : public QObject {
      Q_OBJECT
 
 public:
-    Pipeline(QObject *parent = nullptr);
+    Pipeline(const QString &host, int videoPort, int metadataPort, QObject *parent = nullptr);
 
     ~Pipeline();
 
@@ -27,13 +26,29 @@ public:
 
 signals:
     void frameSizeChanged(QSize rect);
+    void updateRoi(QRect roi);
 
 private:
-    std::unique_ptr<Session> makeVideoSession();
+    class Session {
+    public:
+        Session(int id, QGst::CapsPtr caps, QGst::BinPtr bin, int port);
+        int getId() const;
+        QGst::CapsPtr getCaps() const;
+        QGst::BinPtr getBin() const;
+        int getPort() const;
 
-    std::unique_ptr<Session> makeMetadataSession();
+    private:
+        int id;
+        QGst::CapsPtr caps;
+        QGst::BinPtr bin;
+        int port;
+    };
 
-    void joinSession(QGst::ElementPtr rtpBin, int rtpPort, const Session& session);
+    std::unique_ptr<Session> makeVideoSession(const int port);
+
+    std::unique_ptr<Session> makeMetadataSession(const int port);
+
+    void joinSession(QGst::ElementPtr rtpBin, const Session& session);
 
     QString toString(QGst::State state);
 
@@ -48,9 +63,13 @@ private:
     QGst::PipelinePtr pipeline;
     QGst::ElementPtr videoSink;
     QGst::CapsPtr videoCaps;
-    std::unique_ptr<AppSink> appSink;
+
+    AppSink *appSink;
+
     std::unique_ptr<Session> videoSession;
     std::unique_ptr<Session> metadataSession;
+
+    QString host;
 };
 
 #endif // PIPELINE_H

@@ -33,8 +33,8 @@ SOURCES += main.cpp \
     connectdialog.cpp \
     overlaywidget.cpp \
     appsink.cpp \
-    session.cpp \
-    pipeline.cpp
+    pipeline.cpp \
+    connection.cpp
 
 FORMS += \
     mainwindow.ui \
@@ -46,5 +46,5 @@ HEADERS += \
     connectdialog.h \
     overlaywidget.h \
     appsink.h \
-    session.h \
-    pipeline.h
+    pipeline.h \
+    connection.h

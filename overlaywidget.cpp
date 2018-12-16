@@ -35,7 +35,7 @@ void OverlayWidget::mouseMoveEvent(QMouseEvent *event) {
 void OverlayWidget::mouseReleaseEvent(QMouseEvent *event) {
     settingRoi = false;
     qDebug() << "new ROI:" << this->size() << roi.normalized();
-    emit setROI(this->size(), roi.normalized());
+    emit setRoi(roi.normalized());
 }
 
 void OverlayWidget::paintEvent(QPaintEvent *event) {
